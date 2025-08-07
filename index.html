@@ -183,7 +183,6 @@
         </div>
     </div>
     
-    <!-- Audio element for background music -->
     <audio id="background-music" loop src="[iSongs.info] 02 - Firestorm.mp3"></audio>
 
     <script type="module">
@@ -203,7 +202,7 @@
         const loadingText = document.getElementById('loading-text');
         const instructions = document.getElementById('instructions');
         const mainTitle = document.getElementById('main-title');
-        const musicElement = document.getElementById('background-music'); // Get the audio element
+        const musicElement = document.getElementById('background-music');
 
         // --- Game Constants ---
         const LANE_POSITIONS = [-3.5, 0, 3.5];
@@ -222,8 +221,8 @@
         let shieldTimeout, boostTimeout;
 
         // --- Three.js Setup ---
-        let scene, camera, renderer, playerCar, particles;
-        let roadSegments = [], obstacles = [], powerups = [];
+        let scene, camera, renderer, playerCar;
+        let roadSegments = [], obstacles = [], powerups = [], particleSystems = []; // <-- FIX: Changed 'particles' to 'particleSystems' array
         const clock = new THREE.Clock();
         const gltfLoader = new THREE.GLTFLoader();
         const dracoLoader = new THREE.DRACOLoader();
@@ -341,12 +340,17 @@
             targetLane = 1;
             gameSpeed = BASE_SPEED;
             
-            // Play music
             musicElement.volume = 0.5;
             musicElement.play().catch(error => console.log("Playback was prevented.", error));
 
+            // <-- FIX: Clear all old objects correctly
             [...obstacles, ...powerups].forEach(obj => scene.remove(obj.mesh));
-            if(particles) scene.remove(particles);
+            particleSystems.forEach(p => {
+                scene.remove(p);
+                p.geometry.dispose();
+                p.material.dispose();
+            });
+            particleSystems = [];
             obstacles = [];
             powerups = [];
 
@@ -364,9 +368,8 @@
             gameStarted = false;
             gameOver = true;
 
-            // Stop music
             musicElement.pause();
-            musicElement.currentTime = 0; // Reset for next play
+            musicElement.currentTime = 0;
 
             finalScoreElement.textContent = `Score: ${Math.floor(score)}`;
             gameOverScreen.style.display = 'flex';
@@ -440,6 +443,7 @@
             gameSpeed = BASE_SPEED;
         }
 
+        // <-- FIX: createExplosion now adds to an array instead of a single variable
         function createExplosion(position) {
             const particleCount = 50;
             const geometry = new THREE.BufferGeometry();
@@ -454,9 +458,10 @@
             }
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             const material = new THREE.PointsMaterial({ color: 0xffaa00, size: 0.5, transparent: true, opacity: 1.0 });
-            particles = new THREE.Points(geometry, material);
-            particles.velocities = velocities;
-            scene.add(particles);
+            const newParticleSystem = new THREE.Points(geometry, material);
+            newParticleSystem.velocities = velocities;
+            scene.add(newParticleSystem);
+            particleSystems.push(newParticleSystem);
         }
 
         let lastObstacleSpawn = 0;
@@ -509,18 +514,25 @@
                 }
             });
 
-            if (particles) {
-                const positions = particles.geometry.attributes.position.array;
-                for (let i = 0; i < particles.velocities.length; i++) {
-                    positions[i * 3] += particles.velocities[i].x * deltaTime;
-                    positions[i * 3 + 1] += particles.velocities[i].y * deltaTime;
-                    positions[i * 3 + 2] += particles.velocities[i].z * deltaTime;
+            // <-- FIX: Loop through all particle systems to update and remove them
+            for (let i = particleSystems.length - 1; i >= 0; i--) {
+                const system = particleSystems[i];
+                const positions = system.geometry.attributes.position.array;
+
+                for (let j = 0; j < system.velocities.length; j++) {
+                    positions[j * 3] += system.velocities[j].x * deltaTime;
+                    positions[j * 3 + 1] += system.velocities[j].y * deltaTime;
+                    positions[j * 3 + 2] += system.velocities[j].z * deltaTime;
                 }
-                particles.geometry.attributes.position.needsUpdate = true;
-                particles.material.opacity -= deltaTime * 2;
-                if (particles.material.opacity <= 0) {
-                    scene.remove(particles);
-                    particles = null;
+                system.geometry.attributes.position.needsUpdate = true;
+                
+                system.material.opacity -= deltaTime * 1.5;
+
+                if (system.material.opacity <= 0) {
+                    scene.remove(system);
+                    system.geometry.dispose();
+                    system.material.dispose();
+                    particleSystems.splice(i, 1);
                 }
             }
 
