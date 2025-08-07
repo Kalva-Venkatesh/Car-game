@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Racer Pro - Custom Model</title>
+    <title>3D Racer Pro - Custom Background</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
@@ -149,8 +149,9 @@
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- IMPORTANT: Added GLTFLoader script -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <!-- DRACOLoader script to decompress models -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
 </head>
 <body>
     <div id="container">
@@ -173,7 +174,7 @@
                 Use <strong>Left/Right Arrow Keys</strong> or <strong>Tap Screen Left/Right</strong> to steer.<br>
                 Collect blue orbs for a shield and yellow orbs for a speed boost.
             </p>
-            <p id="loading-text" style="display: none;">Loading Model...</p>
+            <p id="loading-text" style="display: none;">Loading Assets...</p>
             <button id="start-button" class="button">Start Racing</button>
         </div>
         <div id="game-over" class="overlay" style="display: none;">
@@ -219,9 +220,14 @@
 
         // --- Three.js Setup ---
         let scene, camera, renderer, playerCar, particles;
-        let roadSegments = [], cityscape = [], obstacles = [], powerups = [];
+        let roadSegments = [], obstacles = [], powerups = [];
         const clock = new THREE.Clock();
         const gltfLoader = new THREE.GLTFLoader();
+
+        // --- DRACO Loader Setup ---
+        const dracoLoader = new THREE.DRACOLoader();
+        dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/draco/');
+        gltfLoader.setDRACOLoader(dracoLoader);
 
         async function initGameWorld() {
             scene = new THREE.Scene();
@@ -245,52 +251,61 @@
             dirLight.shadow.mapSize.height = 1024;
             scene.add(dirLight);
 
-            playerCar = new THREE.Group(); // Initialize the group
+            playerCar = new THREE.Group();
             scene.add(playerCar);
 
-            await loadPlayerCarModel(); // Load the custom model
+            await Promise.all([
+                loadPlayerCarModel(),
+                loadBackgroundModel()
+            ]);
 
             createRoadAndGround();
-            createCityscape();
-            
             window.addEventListener('resize', onWindowResize);
         }
 
         function loadPlayerCarModel() {
-            return new Promise((resolve, reject) => {
-                // --- IMPORTANT ---
-                // I've replaced the placeholder URL with a working sample model.
-                // You can replace this URL with a link to your own .glb file.
+            return new Promise((resolve) => {
                 const modelUrl = 'Toyota AE86.glb';
-
                 gltfLoader.load(modelUrl, (gltf) => {
                     const model = gltf.scene;
-                    
-                    // --- ADJUST MODEL ---
-                    // These values are adjusted for the sample model.
-                    // You may need to change them to fit your own model.
-                    model.scale.set(0.35, 0.35, 0.35);
-                    model.rotation.y = Math.PI; // Rotate to face forward
-                    
-                    model.traverse(node => {
-                        if (node.isMesh) {
-                            node.castShadow = true;
-                        }
-                    });
-                    
-                    playerCar.add(model); // Add the loaded model to the group
+                    model.scale.set(0.3, 0.3, 0.3);
+                    model.rotation.y = Math.PI;
+                    model.position.y = 0;
+                    model.traverse(node => { if (node.isMesh) node.castShadow = true; });
+                    playerCar.add(model);
                     resolve();
                 }, undefined, (error) => {
-                    console.error('An error happened while loading the model:', error);
-                    // If loading fails, create a fallback car
+                    console.error('Car model failed to load, creating fallback.', error);
                     createFallbackPlayerCar();
-                    resolve(); // Resolve anyway to not break the game
+                    resolve();
+                });
+            });
+        }
+        
+        function loadBackgroundModel() {
+            return new Promise((resolve) => {
+                const modelUrl = 'https://threejs.org/examples/models/gltf/LittlestTokyo.glb';
+                gltfLoader.load(modelUrl, (gltf) => {
+                    const backgroundScene = gltf.scene;
+                    backgroundScene.scale.set(1, 1, 1);
+                    backgroundScene.position.set(0, 0, -250);
+                    backgroundScene.traverse(node => {
+                        if (node.isMesh) {
+                            node.receiveShadow = true;
+                            node.material.metalness = 0.5;
+                            node.material.roughness = 0.6;
+                        }
+                    });
+                    scene.add(backgroundScene);
+                    resolve();
+                }, undefined, (error) => {
+                    console.error('Background model failed to load.', error);
+                    resolve();
                 });
             });
         }
         
         function createFallbackPlayerCar() {
-            console.log("Creating fallback car model.");
             const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff0055, metalness: 0.8, roughness: 0.2 });
             const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 4), bodyMat);
             chassis.position.y = 0.6;
@@ -307,32 +322,6 @@
                 segment.receiveShadow = true;
                 scene.add(segment);
                 roadSegments.push(segment);
-            }
-            const groundMat = new THREE.MeshStandardMaterial({ color: 0x050505 });
-            const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, ROAD_LENGTH), groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            ground.position.y = -0.01;
-            scene.add(ground);
-        }
-
-        function createCityscape() {
-            const buildingGeo = new THREE.BoxGeometry(1, 1, 1);
-            buildingGeo.translate(0, 0.5, 0);
-
-            for(let i = 0; i < 100; i++) {
-                const buildingMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.6, 0.5, Math.random() * 0.1 + 0.05) });
-                const building = new THREE.Mesh(buildingGeo, buildingMat);
-                const scaleX = Math.random() * 8 + 4;
-                const scaleY = Math.random() * 60 + 20;
-                const scaleZ = Math.random() * 8 + 4;
-                building.scale.set(scaleX, scaleY, scaleZ);
-                building.position.set(
-                    (Math.random() > 0.5 ? -1 : 1) * (ROAD_WIDTH / 2 + Math.random() * 100 + 5),
-                    0,
-                    -i * 20
-                );
-                scene.add(building);
-                cityscape.push(building);
             }
         }
         
@@ -476,8 +465,7 @@
 
             const speed = gameSpeed * deltaTime;
             roadSegments.forEach(s => { s.position.z += speed; if (s.position.z > ROAD_LENGTH / 2) s.position.z -= ROAD_LENGTH; });
-            cityscape.forEach(b => { b.position.z += speed * 0.5; if (b.position.z > camera.position.z) b.position.z -= 1000; });
-
+            
             if (distance - lastObstacleSpawn > 15) { createObstacle(); lastObstacleSpawn = distance; }
             if (distance - lastPowerupSpawn > 45) { createPowerup(); lastPowerupSpawn = distance; }
 
@@ -540,7 +528,7 @@
 
         // --- Event Listeners ---
         startButton.addEventListener('click', () => {
-            if (playerCar.children.length > 0) { // Check if car is loaded
+            if (playerCar.children.length > 0) {
                 startGame();
             }
         });
